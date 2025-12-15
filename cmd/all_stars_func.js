@@ -1,46 +1,72 @@
 const { ovlcmd } = require("../lib/ovlcmd");
+const { cardsBlueLock } = require("../DataBase/cardsBL");
 
 ovlcmd({
     nom: "goal",
     isfunc: true
 }, async (ms_org, ovl, { texte, repondre }) => {
-    if (!texte.toLowerCase().startsWith("🔷⚽duel action de but🥅")) return;
+    if (!texte.toLowerCase().startsWith("🔷⚽ goal🥅")) return;
 
-    const tirMatch = texte.match(/🥅Tir\s*=\s*(\d+)/i);
+    // Extraction des stats depuis le pavé
+    const joueurMatch = texte.match(/🥅joueur\s*=\s*(.+)/i);
     const gardienMatch = texte.match(/🥅Gardien\s*=\s*(\d+)/i);
     const zoneMatch = texte.match(/🥅Zone\s*=\s*([\w\s-]+)/i);
     const distanceMatch = texte.match(/🥅Distance\s*=\s*([\d.]+)/i);
 
-    if (!tirMatch || !gardienMatch || !zoneMatch || !distanceMatch) {
+    if (!joueurMatch || !gardienMatch || !zoneMatch || !distanceMatch) {
         return repondre("⚠️ Format incorrect. Assure-toi que la fiche est bien remplie.");
     }
 
-    const tirPuissance = parseInt(tirMatch[1], 10);
+    // Normalisation du nom saisi
+    const joueurNomSaisi = joueurMatch[1].trim().toLowerCase().replace(/\s+/g, ' ');
+
+    // Recherche du joueur dans la database (ignore la casse et les espaces)
+    const joueurData = Object.values(cardsBlueLock).find(joueur => {
+    const nameNormalized = joueur.name.trim().toLowerCase().replace(/\s+/g, ' ');
+    return nameNormalized === joueurNomSaisi;
+});
+
+    if (!joueurData) {
+        return repondre(`⚠️ Joueur non trouvé dans la Database : *${joueurNomSaisi}*`);
+    }
+
+    const tirPuissance = parseInt(joueurData.tir || 50, 10); // Tir pris depuis la Database
     const gardien = parseInt(gardienMatch[1], 10);
     const zone = zoneMatch[1].trim().toLowerCase().replace(/\s+/g, ' ');
     const distance = parseFloat(distanceMatch[1]);
 
-    let resultat;
+    // Calcul du résultat du tir
+const sho = parseInt(joueurData.sho || 50, 10); // sho du joueur
 
-    if (distance <= 5) {
-        resultat = tirPuissance > gardien ? "but" :
-            tirPuissance === gardien ? (Math.random() < 0.5 ? "but" : "arrêt") :
-            (Math.random() < 0.2 ? "but" : "arrêt");
-    } else if (distance <= 10) {
-        resultat = tirPuissance > gardien ? (Math.random() < 0.6 ? "but" : "arrêt") :
-            tirPuissance === gardien ? (Math.random() < 0.3 ? "but" : "arrêt") :
-            (Math.random() < 0.1 ? "but" : "arrêt");
-    } else {
-        resultat = tirPuissance > gardien ? "but" : "arrêt";
-    }
+// Calcul du résultat du tir selon la distance et l'écart sho/gardien
+let probaGoal = 0;
+const ecart = sho - gardien;
 
-    await ovl.sendMessage(ms_org, {
-        video: { url: "https://files.catbox.moe/z64kuq.mp4" },
-        caption: "",
-        gifPlayback: true
-    });
+if (distance <= 5) {
+    if (ecart > 10) probaGoal = 1.0;       // 100%
+    else if (ecart > 0) probaGoal = 0.85;  // 85%
+    else if (ecart === 0) probaGoal = 0.5; // 50%
+    else probaGoal = 0;                     // tir < gardien → 0%
+} else if (distance <= 10) {
+    if (ecart > 10) probaGoal = 0.9;       // 90%
+    else if (ecart > 0) probaGoal = 0.65;  // 65%
+    else if (ecart === 0) probaGoal = 0.3; // 30%
+    else if (ecart >= -5) probaGoal = 0.2; // tir < gardien mais < 5 points → 20%
+    else probaGoal = 0;                     // sinon 0%
+} else {
+    // Pour les distances >10, ajustement possible
+    if (ecart > 10) probaGoal = 0.85;
+    else if (ecart > 0) probaGoal = 0.6;
+    else if (ecart === 0) probaGoal = 0.2;
+    else if (ecart >= -5) probaGoal = 0.1;
+    else probaGoal = 0;
+}
 
-    if (resultat === "but") {
+// Tir aléatoire selon la probabilité
+const tirAleatoire = Math.random(); // valeur entre 0 et 1
+const resultat = tirAleatoire <= probaGoal ? "but" : "arrêt"; 
+
+   if (resultat === "but") {
         const commentaires = {
             "lucarne droite": ["*🎙️: COMME UN MISSILE GUIDÉ ! Le ballon se niche dans la lucarne droite - splendide !*", "*🎙️: UNE FRAPPE POUR L'HISTOIRE ! La lucarne droite explose sous l'effet de la frappe !*"],
             "lucarne gauche": ["*🎙️: MAGNIFIQUE ! La lucarne gauche est pulvérisée par cette frappe !*", "*🎙️: UNE PRÉCISION D'ORFÈVRE ! Lucarne gauche touchée, le gardien impuissant !*"],
@@ -59,17 +85,30 @@ ovlcmd({
         }
 
         const commentaire = commentaires[zone][Math.floor(Math.random() * commentaires[zone].length)];
-        const video = [
+
+        // 1️⃣ Premier GIF : GOAL classique avec commentaire
+        const videoGoal = [
             "https://files.catbox.moe/chcn2d.mp4",
             "https://files.catbox.moe/t04dmz.mp4",
             "https://files.catbox.moe/8t1eya.mp4"
         ][Math.floor(Math.random() * 3)];
 
         await ovl.sendMessage(ms_org, {
-            video: { url: video },
+            video: { url: videoGoal },
             caption: `*🥅:✅GOOAAAAAL!!!⚽⚽⚽ ▱▱▱▱*\n${commentaire}`,
             gifPlayback: true
         });
+
+        // 2️⃣ Deuxième GIF : célébration spécifique du joueur
+        const gifCelebration = joueurData.goal;
+        if (gifCelebration) {
+            await ovl.sendMessage(ms_org, {
+                video: { url: gifCelebration },
+                caption: "",
+                gifPlayback: true
+            });
+        }
+
     } else {
         await ovl.sendMessage(ms_org, {
             video: { url: 'https://files.catbox.moe/88lylr.mp4' },
